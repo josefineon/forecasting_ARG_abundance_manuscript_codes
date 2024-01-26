@@ -62,7 +62,7 @@ The data required for the analysis is located within the `data/` directory of th
 -   `ARG_abundance_adj.txt`
     -   Contains the ARG abundance time series, after adjusting systematic error (output from script: `1_preprocessing.Rmd`).
 -   `ARG_abundance_trend.txt`
-    -   Contains the ARG abundance time series trends, after decomposition (output from script: `2_decomposition_stationarity.Rmd`).\
+    -   Contains the ARG abundance time series trends, after decomposition (output from script: `2_decomposition_stationarity.Rmd`).
 -   `ARG_abundance_trend_diff.txt`
     -   Contains the differenced ARG abundance time series trends, after differencing (output from script: `2_decomposition_stationarity.Rmd`).
 -   `lifetime_AMU_trend.txt`
