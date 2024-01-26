@@ -79,3 +79,7 @@ The data and code provided in this project are for academic and non-commercial u
 Please note that while the code and data are provided here for reproducibility and academic purposes, the intellectual property rights of the results and findings they produce belong to the authors of the ***Forecasting Antimicrobial Resistance Gene Abundance in the Danish Pig Production through Time Series Analysis of Antimicrobial Usage and Resistance Data*** unless otherwise specified.
 
 If you wish to use any of the project's contents for purposes beyond those outlined above, including commercial use or in a manner associated with the publication of your own findings or results, please contact the authors for permission.
+
+## Corresponding Author 
+
+Josefine Ostenfeld Nielsen, Research Group for Genomic Epidemiology, Technical University of Denmark, Søltoft Plads, DK-2800 Kgs. Lyngby, Denmark. E-mail: josefineon@gmail.com
