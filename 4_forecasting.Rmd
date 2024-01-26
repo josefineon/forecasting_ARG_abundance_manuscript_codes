@@ -1,0 +1,136 @@
+
+Title: ARG abundance 2022 forecast accuracy of significant DR models
+Author: Josefine Ostenfeld Nielsen, National Food Institute, Technical University of Denmark (josefineon@gmail.com)
+Date: January 2024
+Description: Computing ARG abundance trend forecast for 2022 and testing forecast accuracy against the observed ARG abundance trends in 2022
+
+________________________________________________________________________________
+
+
+Installing packages and loading libraries
+
+```{r, message=F, warning=F}
+# Sourcing packages and libraries from the setup.R script
+source(file.path("setup.R"))
+```
+
+Importing ARG abundance and lifetime AMU data
+
+```{r}
+# Reading ARG abundance and lifetime AMU files
+ARG_abundance_trend <- read.table(file.path("data/ARG_abundance_trend.txt"), header = TRUE, sep = "\t")
+ARG_abundance_trend_diff <- read.table(file.path("data/ARG_abundance_trend_diff.txt"), header = TRUE, sep = "\t")
+lifetime_AMU_trend <- read.table(file.path("data/lifetime_AMU_trend.txt"), header = TRUE, sep = "\t")
+lifetime_AMU_trend_diff <- read.table(file.path("data/lifetime_AMU_trend_diff.txt"), header = TRUE, sep = "\t")
+
+# Formatting Date column 
+ARG_abundance_trend$Date <- as.Date(ARG_abundance_trend$Date)
+ARG_abundance_trend_diff$Date <- as.Date(ARG_abundance_trend_diff$Date)
+lifetime_AMU_trend$Date <- as.Date(lifetime_AMU_trend$Date)
+lifetime_AMU_trend_diff$Date <- as.Date(lifetime_AMU_trend_diff$Date)
+```
+
+________________________________________________________________________________
+
+
+Computing forecast and estimating forecast accuracy
+
+```{r, message=FALSE, fig.height=16, fig.width=12, warning = FALSE}
+# Defining significant DR models
+plot_list <- list(
+  list(column_amr = "Aminoglycoside", column_amu = "Aminoglycosides", title = "Aminoglycoside (8)", p = 0, q = 2, P = 0, Q = 1, lag = 8),
+  list(column_amr = "Amphenicol", column_amu = "Amphenicols", title = "Amphenicol (8)", p = 0, q = 1, P = 0, Q = 0, lag = 8),
+  list(column_amr = "Amphenicol", column_amu = "Amphenicols", title = "Amphenicol (16)", p = 0, q = 1, P = 0, Q = 0, lag = 16),
+  list(column_amr = "Beta.lactam", column_amu = "ExtPenicillins", title = "ExtPenicillin (7)", p = 2, q = 1, P = 0, Q = 1, lag = 7),
+  list(column_amr = "Beta.lactam", column_amu = "ExtPenicillins", title = "ExtPenicillin (17)", p = 2, q = 1, P = 0, Q = 1, lag = 17),
+  list(column_amr = "Beta.lactam", column_amu = "SimPenicillins", title = "SimPenicillin (7)", p = 2, q = 3, P = 0, Q = 0, lag = 7),
+  list(column_amr = "Lincosamide", column_amu = "Lincosamides", title = "Lincosamide (5)", p = 2, q = 0, P = 0, Q = 0, lag = 5),
+  list(column_amr = "Macrolide", column_amu = "Macrolides", title = "Macrolide (0)", p = 0, q = 1, P = 0, Q = 0, lag = 0),
+  list(column_amr = "Macrolide", column_amu = "Macrolides", title = "Macrolide (2)", p = 0, q = 1, P = 0, Q = 0, lag = 2),
+  list(column_amr = "Pleuromutilin", column_amu = "Pleuromutilins", title = "Pleuromutilin (7)", p = 3, q = 0, P = 0, Q = 1, lag = 7),
+  list(column_amr = "Tetracycline", column_amu = "Tetracyclines", title = "Tetracycline (9)", p = 0, q = 3, P = 0, Q = 1, lag = 9),
+  list(column_amr = "Tetracycline", column_amu = "Tetracyclines", title = "Tetracycline (14)", p = 0, q = 3, P = 1, Q = 2, lag = 14),
+  list(column_amr = "Tetracycline", column_amu = "Tetracyclines", title = "Tetracycline (15)", p = 0, q = 3, P = 0, Q = 1, lag = 15))
+
+# Data frame to store forecast accuracy measures 
+df <- data.frame(
+  amr_class = character(),
+  ME = numeric(),
+  RMSE = numeric(),
+  MAPE = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop to forecast and estimate forecast accuracy individually for each DR model
+for (n in plot_list) {
+
+  # Filtering AM-class
+  amu <- lifetime_AMU_trend_diff %>%
+    filter(am_group == n$column_amu) %>%
+    select(-am_group)
+  
+  # Filtering AMR-class
+  amr <- ARG_abundance_trend_diff %>%
+    filter(amr_class == n$column_amr) %>%
+    select(-amr_class) 
+
+  # Aligning AMR and time-lagged AMU (identified significant predictor) time series for training data set (2015-2021)
+  aligned_data <- amu %>%
+    left_join(amr, by = "Date") %>%
+    mutate(amu = lag(amu, n = n$lag, default = NA)) %>%
+    filter(!is.na(amr)) %>%
+    filter(year(Date) < 2022) %>%
+    mutate(Date = yearmonth(Date)) %>%
+    as_tsibble(index = Date)
+  
+  # Computing identified significant DR model
+  model <- aligned_data %>%
+    model(ARIMA(amr ~ 0 + amu + pdq(n$p,0,n$q) + PDQ(n$P,0,n$Q)))
+
+  # Defining the subset of the lifetime AMU time series identified as the significant predictor of the ARG abundance from January 2022 to October 2022
+  data_forecast <- amu %>%
+    slice((n()-(11+n$lag)):(n()-(2+n$lag))) %>%
+    mutate(Date = Date + months(n$lag)) %>%
+    mutate(Date = yearmonth(Date)) %>%
+    as_tsibble(index = Date)
+  
+  # Forecasting ARG abundance 2022 trend
+  fcast <- forecast(model, new_data = data_forecast)
+  
+  # Storing forecast (chance in ARG abundance from the month prior) with respective months in 2022
+  fcast_result <- bind_cols(Date = amu[(nrow(amu)-(11)):(nrow(amu)-(2)), 1], amr_diff_forecast = fcast$.mean)
+  
+  # Defining ARG abundance trend time series data (not differenced)
+  amr <- ARG_abundance_trend %>%
+    filter(amr_class == n$column_amr) %>%
+    select(-amr_class) 
+  
+  # Initiating vector to store absolute ARG abundance forecast values for the 10 months (January 2022 to October 2022) 
+  fcast_result$amr_forecast <- numeric(10)
+  
+  # Estimating absolute ARG abundance forecasted for January 2022
+  fcast_result$amr_forecast[1] <- amr$amr[80] + fcast_result$amr_diff_forecast[1]
+
+  # Loop through the remaining rows to calculate absolute ARG abundance forecast values for each month
+  for(i in 2:nrow(fcast_result)) {
+    fcast_result$amr_forecast[i] <- fcast_result$amr_forecast[i-1] + fcast_result$amr_diff_forecast[i]
+  }
+      
+  # Defining test dataset (observed ARG abundance trend in 2022)
+  amr_22 <- amr %>% filter(year(Date) > 2021) 
+  
+  # Estimating forecast accuracy against test dataset and storing results 
+  df <- rbind(df, data.frame(
+    amr_class = n$title,
+    ME = mean(amr_22$amr - fcast_result$amr_forecast),
+    RMSE = sqrt(mean((amr_22$amr - fcast_result$amr_forecast)^2)),
+    MAPE = mean(abs(amr_22$amr - fcast_result$amr_forecast) / amr_22$amr) * 100
+  ))
+}
+
+# Printing results
+print(df)
+```
+
+
+

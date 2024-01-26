@@ -1,0 +1,316 @@
+
+Title: Regression analysis: Dynamic regression time series models of ARG abundance with lifetime AMU as lagged predictor 
+Author: Josefine Ostenfeld Nielsen, National Food Institute, Technical University of Denmark (josefineon@gmail.com)
+Date: January 2024
+Description: Computing 152 DR models and identifying models with positive and significant regression coefficients
+
+________________________________________________________________________________
+
+
+Installing packages and loading libraries
+
+```{r, message=F, warning=F}
+# Sourcing packages and libraries from the setup.R script
+source(file.path("setup.R"))
+```
+
+
+Importing ARG abundance and lifetime AMU data
+
+```{r}
+# Reading ARG abundance and lifetime AMU files
+ARG_abundance_trend_diff <- read.table(file.path("data/ARG_abundance_trend_diff.txt"), header = TRUE, sep = "\t")
+lifetime_AMU_trend_diff <- read.table(file.path("data/lifetime_AMU_trend_diff.txt"), header = TRUE, sep = "\t")
+
+# Formatting Date column 
+ARG_abundance_trend_diff$Date <- as.Date(ARG_abundance_trend_diff$Date)
+lifetime_AMU_trend_diff$Date <- as.Date(lifetime_AMU_trend_diff$Date)
+```
+
+________________________________________________________________________________
+
+
+Computing DR models individually for each AM and corresponding AMR
+OBS: approx. run time = 10 min (loop with automatic model selection of SARIMA errors for all 152 DR model)
+
+```{r, message=F, warning = F}
+# Defining AMR-class and AM-class in each model
+plot_list <- list(
+  list(column_amr = "Aminoglycoside", column_amu = "Aminoglycosides"),
+  list(column_amr = "Amphenicol", column_amu = "Amphenicols"),
+  list(column_amr = "Beta.lactam", column_amu = "SimPenicillins"),
+  list(column_amr = "Beta.lactam", column_amu = "ExtPenicillins"),
+  list(column_amr = "Lincosamide", column_amu = "Lincosamides"),
+  list(column_amr = "Macrolide", column_amu = "Macrolides"),
+  list(column_amr = "Pleuromutilin", column_amu = "Pleuromutilins"),
+  list(column_amr = "Tetracycline", column_amu = "Tetracyclines"))
+
+# Data frame to store DR models in each loop
+DR_models <- data.frame(
+  am_class = character(),
+  lag = numeric(),
+  reg_coef = numeric(),
+  std = numeric(),
+  p_val <- numeric(),
+  model = character(),
+  R = numeric(),
+  AIC = numeric(),
+  BIC = numeric(),
+  r = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Initialize an empty data frame all DR models
+DR_models_all <- data.frame()
+
+# Loop to compute DR model for each class, with nested loop to compute model with 0-18 months lagged lifetime AMU
+for (n in plot_list) {
+  
+  # Filtering AM-class
+  amu <- lifetime_AMU_trend_diff %>%
+    filter(am_group == n$column_amu) %>%
+    select(-am_group)
+  
+  # Filtering AMR-class
+  amr <- ARG_abundance_trend_diff %>%
+    filter(amr_class == n$column_amr) %>%
+    select(-amr_class) 
+  
+  # Number of lags [months]
+  lags <- seq(0, 18)
+  
+  # Loop to compute DR model for each class with 0-18 months lagged lifetime AMU
+  for (n_lag in lags) {
+    
+    # Aligning AMR and time-lagged AMU time series for training data set (2015-2021)
+    aligned_data <- amu %>%
+      left_join(amr, by = "Date") %>%
+      mutate(amu_lag = lag(amu, n = n_lag, default = NA)) %>%
+      filter(!is.na(amr)) %>%
+      filter(year(Date) < 2022) %>%
+      mutate(Date = yearmonth(Date)) %>%
+      as_tsibble(index = Date)
+    
+    # Computing DR model with automatic model selection to determine the order of p, q, P, and Q
+    # Both AIC and BIC automatic model selection aplied, by running code twice, once with ic = "aic" and once with ic = "bic"
+    model <- aligned_data %>%
+      model(ARIMA(amr ~ 0 + amu_lag + pdq(d=0) + PDQ(D=0), ic = "aic"))
+    
+    # Estimating Pearson's correlation coefficient (one-sided)
+    pearson_corr <- cor.test(aligned_data$amu_lag, aligned_data$amr, alternative = "greater", method = "pearson")
+    
+    # Estimating TSS (total sum of squares)
+    tss <- sum((aligned_data$amr - mean(aligned_data$amr))^2)
+    
+    # Estimating RSS (residual sum of squares)
+    fitted_values <- fitted(model)
+    rss <- sum((aligned_data$amr - fitted_values$.fitted)^2)
+    
+    # Storing model output
+    a <- tidy(model)
+    
+    # Storing DR model, coefficients, p-val, SARIMA terms order, R squared, model criterion, and correlation coefficient 
+    DR_models <- rbind(DR_models, data.frame(
+      am_class = n$column_amu,
+      lag = n_lag,
+      reg_coef = as.numeric(a[a$term == 'amu_lag', 'estimate']),
+      std = as.numeric(a[a$term == 'amu_lag', 'std.error']),
+      p_val = as.numeric(a[a$term == 'amu_lag', 'p.value']), 
+      model = str_extract(model[[1]][1], "(?<=<).*(?=>)"),
+      R = 1-(rss/tss),
+      AIC = model[[1]][[1]][["fit"]][["fit"]][["AIC"]],
+      BIC = model[[1]][[1]][["fit"]][["fit"]][["BIC"]],
+      r = pearson_corr$estimate[["cor"]]
+    ))
+  }
+  
+  # Storing all DR models in combined data frame 
+    if(nrow(DR_models_all) == 0){
+      DR_models_all <- DR_models
+    } else {
+      DR_models_all <- rbind(DR_models_all, DR_models)
+    }
+  
+  # Resetting data frame for storing DR models in each loop
+  DR_models <- NULL
+}
+
+# Calculating one-sided p-value, filtering significant DR models
+sign_DR_models <- DR_models_all %>%
+  mutate(p_val = p_val/2)
+  filter(p_val < 0.05) %>% 
+  filter(reg_coef > 0) %>%
+  filter(r > 0)
+
+# Function to assign significance code 
+assign_sig_code <- function(p_value) {
+  if (p_value < 0.001) {
+    return("***")
+  } else if (p_value < 0.01) {
+    return("**")
+  } else if (p_value < 0.05) {
+    return("*")
+  } else if (p_value < 0.1) {
+    return("˙")
+  } else {
+    return("")
+  }
+}
+
+# Adding column with significant code
+sign_DR_models$sign_code <- sapply(sign_DR_models$p_val, assign_sig_code)
+
+# Printing models
+print(sign_DR_models)
+```
+
+
+Significant DR models (all coefficients and diagnostic plots of innovation errors)
+
+```{r}
+# Identified significant DR models (un-commenting individually to run code separately for each model)
+
+column_amr <- "Aminoglycoside"
+column_amu <- "Aminoglycosides"
+p1 <- 0
+q1 <- 2
+P1 <- 0
+Q1 <- 1
+lag <- 8
+
+# column_amr <- "Amphenicol"
+# column_amu <- "Amphenicols"
+# p1 <- 0
+# q1 <- 1
+# P1 <- 0
+# Q1 <- 0
+# lag <- 8
+
+# column_amr <- "Amphenicol"
+# column_amu <- "Amphenicols"
+# p1 <- 0
+# q1 <- 1
+# P1 <- 0
+# Q1 <- 0
+# lag <- 16
+
+# column_amr <- "Beta.lactam"
+# column_amu <- "ExtPenicillins"
+# p1 <- 2
+# q1 <- 1
+# P1 <- 0
+# Q1 <- 1
+# lag <- 7
+
+# column_amr <- "Beta.lactam"
+# column_amu <- "ExtPenicillins"
+# p1 <- 2
+# q1 <- 1
+# P1 <- 0
+# Q1 <- 1
+# lag <- 17
+
+# column_amr <- "Beta.lactam"
+# column_amu <- "SimPenicillins"
+# p1 <- 2
+# q1 <- 3
+# P1 <- 0
+# Q1 <- 0
+# lag <- 7
+
+# column_amr <- "Lincosamide"
+# column_amu <- "Lincosamides"
+# p1 <- 2
+# q1 <- 0
+# P1 <- 0
+# Q1 <- 0
+# lag <- 5
+
+# column_amr <- "Macrolide"
+# column_amu <- "Macrolides"
+# p1 <- 0
+# q1 <- 1
+# P1 <- 0
+# Q1 <- 0
+# lag <- 0
+
+# column_amr <- "Macrolide"
+# column_amu <- "Macrolides"
+# p1 <- 0
+# q1 <- 1
+# P1 <- 0
+# Q1 <- 0
+# lag <- 2
+
+# column_amr <- "Pleuromutilin"
+# column_amu <- "Pleuromutilins"
+# p1 <- 3
+# q1 <- 0
+# P1 <- 0
+# Q1 <- 1
+# lag <- 7
+
+# column_amr <- "Tetracycline"
+# column_amu <- "Tetracyclines"
+# p1 <- 0
+# q1 <- 3
+# P1 <- 0
+# Q1 <- 1
+# lag <- 9
+
+# column_amr <- "Tetracycline"
+# column_amu <- "Tetracyclines"
+# p1 <- 0
+# q1 <- 3
+# P1 <- 1
+# Q1 <- 2
+# lag <- 14
+
+# column_amr <- "Tetracycline"
+# column_amu <- "Tetracyclines"
+# p1 <- 0
+# q1 <- 3
+# P1 <- 0
+# Q1 <- 1
+# lag <- 15
+
+
+# Filtering AM-class
+amu <- lifetime_AMU_trend_diff %>%
+  filter(am_group == column_amu) %>%
+  select(-am_group)
+
+# Filtering AMR-class
+amr <- ARG_abundance_trend_diff %>%
+  filter(amr_class == column_amr) %>%
+  select(-amr_class) 
+
+# Aligning AMR and time-lagged AMU (identified significant predictor) time series for training data set (2015-2021)
+aligned_data <- amu %>%
+  left_join(amr, by = "Date") %>%
+  mutate(amu_lag = lag(amu, n = lag, default = NA)) %>%
+  filter(!is.na(amr)) %>%
+  filter(year(Date) < 2022) %>%
+  mutate(Date = yearmonth(Date)) %>%
+  as_tsibble(index = Date)
+
+# Computing identified significant DR model
+model <- aligned_data %>%
+  model(ARIMA(amr ~ 0 + amu_lag + pdq(p1,0,q1) + PDQ(P1,0,Q1)))
+
+# Printing model output
+report(model)
+tidy(model)
+
+# Regression errors diagnostic plots
+residuals(model, type = "regression") %>%
+  gg_tsdisplay(.resid, plot_type = "scatter") +
+  labs(title = "Regression errors")
+
+# Innovation errors diagnostic plots
+residuals(model, type = "innovation") %>%
+  gg_tsdisplay(.resid, plot_type = "scatter") +
+  labs(title = "Innovation errors")
+```
+
+

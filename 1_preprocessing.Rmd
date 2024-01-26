@@ -1,0 +1,147 @@
+
+Title: ARG abundance time series data pre-processing
+Author: Josefine Ostenfeld Nielsen, National Food Institute, Technical University of Denmark (josefineon@gmail.com)
+Date: January 2024
+Description: Linear interpolation of data gaps and adjustment of systematic error
+
+________________________________________________________________________________
+
+
+Installing packages and loading libraries
+
+```{r, message=F, warning=F}
+# Sourcing packages and libraries from the setup.R script 
+source(file.path("setup.R"))
+```
+
+
+Importing ARG abundance time series data
+
+```{r}
+# Reading ARG abundance file
+ARG_abundance <- read.table(file.path("data/ARG_abundance.txt"), header = TRUE, sep = "\t")
+
+# Formatting Date column 
+ARG_abundance$Date <- as.Date(ARG_abundance$Date)
+```
+
+________________________________________________________________________________
+
+
+Linear interpolation of data gaps in ARG abundance time series 
+
+```{r}
+# Defining AMR-classes
+amr_class_names <- c(
+  "Aminoglycoside",
+  "Amphenicol",
+  "Beta.lactam",
+  "Lincosamide",
+  "Macrolide",
+  "Pleuromutilin",
+  "Tetracycline"
+)
+
+# Creating an empty data frame to store interpolated data
+ARG_abundance_interpolated <- data.frame(
+  Date = as.Date(character(0)),
+  amr = numeric(0),
+  amr_class = character(0)
+)
+
+# Looping through AMR-classes in ARG abundance dataframe and interpolating ARG abundances in data gaps
+for (class in amr_class_names) {
+
+  # Filtering each AMR-class
+  data <- ARG_abundance %>%
+    filter(amr_class == class) %>%
+    select(-amr_class)
+
+  # Sequence of dates spanning full time series range
+  all_dates <- data.frame(Date = seq(from = as.Date("2015-03-01"), to = as.Date("2022-12-01"), by = "1 month"))
+
+  # Adding ARG abundances to the dates and NA values to dates with missing ARG abundance values
+  data <- left_join(all_dates, data, by = "Date")
+
+  # Converting to zoo object
+  data_zoo <- zoo(data$amr, order.by = data$Date)
+
+  # Performing linear interpolation to impute missing values
+  data_zoo <- na.approx(data_zoo)
+
+  # Creating a data frame with interpolated data for the current AMR class
+  data <- data.frame(Date = time(data_zoo), amr_class = class, amr = coredata(data_zoo))
+
+  # Bind the interpolated data for the current AMR class to data_interpolated
+  ARG_abundance_interpolated <- bind_rows(ARG_abundance_interpolated, data)
+}
+```
+
+
+Adjusting ARG abundance data from 2015-2018 by multiplying with average ratio between months in 2018 and 2019
+
+```{r}
+# Data frame to store ratios
+ratios_df <- data.frame(
+  amr_class = character(),
+  Rc = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Data frame to store adjusted ARG abundance data
+ARG_abundance_adjusted <- data.frame(
+  Date = as.Date(character()),
+  amr = numeric(),
+  amr_class = character(),
+  stringsAsFactors = FALSE
+)
+
+# Loop to adjust ARG abundance data from 2015-2018 individually for each AMR-class
+for (class in amr_class_names) {
+
+  # Filtering AMR-class, 2018 and 2019 data
+  amr <- ARG_abundance_interpolated %>%
+    filter(amr_class == class) %>%
+    select(-amr_class) %>%
+    filter(year(Date) > 2017) %>%
+    filter(year(Date) < 2020)
+
+  # Selecting FPKM values from 2018 and 2019
+  amr_18 <- amr[(1:12), ]
+  amr_19 <- amr[(13:24), ]
+
+  # Estimating ratio between FPKM for each month in 2019 and all month in 2018
+  amr_19$amr_diff_dec18 <- amr_19$amr/amr_18$amr[12]
+  amr_19$amr_diff_nov18 <- amr_19$amr/amr_18$amr[11]
+  amr_19$amr_diff_oct18 <- amr_19$amr/amr_18$amr[10]
+  amr_19$amr_diff_sep18 <- amr_19$amr/amr_18$amr[9]
+  amr_19$amr_diff_aug18 <- amr_19$amr/amr_18$amr[8]
+  amr_19$amr_diff_jul18 <- amr_19$amr/amr_18$amr[7]
+  amr_19$amr_diff_jun18 <- amr_19$amr/amr_18$amr[6]
+  amr_19$amr_diff_maj18 <- amr_19$amr/amr_18$amr[5]
+  amr_19$amr_diff_apr18 <- amr_19$amr/amr_18$amr[4]
+  amr_19$amr_diff_mar18 <- amr_19$amr/amr_18$amr[3]
+  amr_19$amr_diff_feb18 <- amr_19$amr/amr_18$amr[2]
+  amr_19$amr_diff_jan18 <- amr_19$amr/amr_18$amr[1]
+
+  # Estimating the mean ratio between the FPKM values each month in 2019 and 2018
+  Rc <- mean(apply(amr_19[, 3:14], MARGIN = 2, function(x) mean(x, na.rm = TRUE)))
+  
+  # Storing results in data frame for each amr class
+  ratios_df <- rbind(ratios_df, data.frame(
+    amr_class = class,
+    Rc = Rc
+  ))
+  
+  # Adjusting ARG abundance 
+  ARG_adj <- ARG_abundance_interpolated %>%
+    filter(amr_class == class) %>%
+    mutate(across(where(is.numeric), ~ if_else(year(Date) < 2019, . * Rc, .)))
+
+  # Storing adjusted data for each AMR-class
+  ARG_abundance_adjusted <- bind_rows(ARG_abundance_adjusted, ARG_adj)
+}
+```
+
+
+

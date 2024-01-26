@@ -1,0 +1,408 @@
+
+Title: Lifetime AMU and ARG abundance time series decomposition and stationarity
+Author: Josefine Ostenfeld Nielsen, National Food Institute, Technical University of Denmark (josefineon@gmail.com)
+Date: January 2024
+Description: Isolating trend component and differencing, stationarity tests and summary statistics
+
+________________________________________________________________________________
+
+
+Installing packages and loading libraries
+
+```{r, message=F, warning=F}
+# Sourcing packages and libraries from the setup.R script
+source(file.path("setup.R"))
+```
+
+
+Importing ARG abundance and lifetime AMU data
+
+```{r}
+# Reading ARG abundance and lifetime AMU files
+ARG_abundance_adjusted <- read.table(file.path("data/ARG_abundance_adj.txt"), header = TRUE, sep = "\t")
+lifetime_AMU <- read.table(file.path("data/lifetime_AMU.txt"), header = TRUE, sep = "\t")
+
+# Formatting Date column 
+ARG_abundance_adjusted$Date <- as.Date(ARG_abundance_adjusted$Date)
+lifetime_AMU$Date <- as.Date(lifetime_AMU$Date)
+```
+
+________________________________________________________________________________
+
+
+Decomposing ARG abundance time series, extracting trend-cycle component, and differencing 
+
+```{r}
+# Defining AMR-classes
+amr_class_names <- c(
+  "Aminoglycoside",
+  "Amphenicol",
+  "Beta.lactam",
+  "Lincosamide",
+  "Macrolide",
+  "Pleuromutilin",
+  "Tetracycline"
+)
+
+# Data frame to store ARG abundance trend component 
+ARG_abundance_trend <- data.frame(
+  Date = as.Date(character()),
+  amr_class = character(),
+  amr = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Data frame to store differenced ARG abundance trend component 
+ARG_abundance_trend_diff <- data.frame(
+  Date = as.Date(character()),
+  amr_class = character(),
+  amr = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop to decompose the ARG abundance time series individually for each AMR-class and extract trend component 
+for (class in amr_class_names) {
+  
+  # Filtering AMR-class
+  amr <- ARG_abundance_adjusted %>%
+    filter(amr_class == class) %>%
+    select(-amr_class)
+  
+  # Converting into tsibble object (time series Date format)
+  amr_ts <- amr %>%
+    mutate(Date = yearmonth(Date)) %>%
+    as_tsibble(index = Date)
+  
+  # Decomposing ARG abundance time series (seasonally adjusting and smoothing)
+  amr_decomposed <- stl(amr_ts, s.window = "periodic", t.window = 7)
+  amr_decomposed <- data.frame(amr_decomposed$time.series)
+  
+  # Isolating ARG abundance trend
+  amr_trend <- bind_cols(Date = amr$Date, amr = amr_decomposed$trend)
+  
+  # Removing first and last two values with incomplete smoothing 
+  amr_trend <- amr_trend %>%
+    slice(3:(n()-2)) %>%
+    mutate(amr_class = class)
+  
+  # Saving ARG abundance trend in data frame 
+  ARG_abundance_trend <- rbind(ARG_abundance_trend, amr_trend)
+  
+  # Differencing ARG abundance trend and removing first value (where differencing cannot be computed)
+  amr_diff <- data.frame(amr = diff(amr_trend$amr, differences = 1))
+  amr_diff <- bind_cols(Date = amr_trend[-(1), 1], amr_diff)
+  amr_diff <- amr_diff %>% mutate(amr_class = class)
+  
+  # Saving differenced ARG abundance trend in data frame 
+  ARG_abundance_trend_diff <- rbind(ARG_abundance_trend_diff, amr_diff)
+}
+```
+
+
+Decomposing lifetime AMU time series, extracting trend-cycle component, and differencing 
+
+```{r}
+# Defining AM-classes
+am_class_names <- c(
+  "Aminoglycosides",
+  "Amphenicols",
+  "SimPenicillins",
+  "ExtPenicillins",
+  "Lincosamides",
+  "Macrolides",
+  "Pleuromutilins",
+  "Tetracyclines"
+)
+
+# Data frame to store lifetime AMU trend component 
+lifetime_AMU_trend <- data.frame(
+  Date = as.Date(character()),
+  amr_class = character(),
+  amr = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Data frame to store differenced lifetime AMU trend component 
+lifetime_AMU_trend_diff <- data.frame(
+  Date = as.Date(character()),
+  amr_class = character(),
+  amr = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop to decompose the lifetime AMU time series individually for each AM-class and extract trend component
+for (class in am_class_names) {
+  
+  # Filtering AM-class
+  amu <- lifetime_AMU %>%
+    filter(am_group == class) %>%
+    select(-am_group)
+  
+  # Converting into tsibble object (time series Date format)
+  amu_ts <- amu %>%
+    mutate(Date = yearmonth(Date)) %>%
+    as_tsibble(index = Date)
+  
+  # Decomposing lifetime AMU time series (seasonally adjusting)
+  amu_decomposed <- stl(amu_ts, s.window = "periodic")
+  amu_decomposed <- data.frame(amu_decomposed$time.series)
+  amu_seasadj <- data.frame(amu$amu - amu_decomposed$seasonal)
+  
+  # Isolating lifetime AMU trend (smoothing)
+  amu_trend <- data.frame(amu = SMA(amu_seasadj, n = 3))
+  
+  # Removing first two values with incomplete smoothing 
+  amu_trend <- bind_cols(Date = amu[-(1:2),1], amu = amu_trend[-(1:2),])
+  
+  # Differencing lifetime AMU trend and removing first value (where differencing cannot be computed)
+  amu_diff <- data.frame(amu = diff(amu_trend$amu, differences = 1))
+  amu_diff <- bind_cols(Date = amu_trend[-(1), 1], amu_diff)
+  
+  # Adding AM-class to data
+  amu_trend <- amu_trend %>% mutate(am_group = class) 
+  amu_diff <- amu_diff %>% mutate(am_group = class) 
+  
+  # Saving lifetime AMU trend in data frame 
+  lifetime_AMU_trend <- rbind(lifetime_AMU_trend, amu_trend)
+  
+  # Saving differenced lifetime AMU trend in data frame 
+  lifetime_AMU_trend_diff <- rbind(lifetime_AMU_trend_diff, amu_diff)
+}  
+```
+
+________________________________________________________________________________
+
+
+Testing stationarity of differenced ARG abundance trend time series 
+
+```{r, warning=F, message=F}
+# Defining AMR-classes
+am_group_names <- c(
+  "Aminoglycoside",
+  "Amphenicol",
+  "Beta.lactam",
+  "Lincosamide",
+  "Macrolide",
+  "Pleuromutilin",
+  "Tetracycline"
+)
+
+# Data frame to store stationarity test results 
+stationarity_results <- data.frame(
+  AMGroup = character(),
+  Original_KPSS_stat = numeric(),
+  Original_KPSS_p_value = numeric(),
+  Original_ADF_stat = numeric(),
+  Original_ADF_p_value = numeric(),
+  Diff1_KPSS_stat = numeric(),
+  Diff1_KPSS_p_value = numeric(),
+  Diff1_ADF_stat = numeric(),
+  Diff1_ADF_p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop to test stationarity individually for each AMR-class for the ARG abundance time series trend before and after differencing 
+for (am in am_group_names) {
+
+  # Filtering AMR-class of ARG abundance trend time series 
+  data <- ARG_abundance_trend %>%
+    filter(amr_class == am) %>%
+    select(-amr_class) 
+  
+  # Filtering AMR-class of differenced ARG abundance trend time series 
+  data_diff <- ARG_abundance_trend_diff %>%
+    filter(amr_class == am) %>%
+    select(-amr_class) 
+  
+  # Kwiatkowski-Phillips-Schmidt-Shin (KPSS) test for trend stationarity
+  kpss_test <- kpss.test(data$amr)
+  kpss_test_diff <- kpss.test(data_diff$amr)
+  
+  # Augmented-Dickey–Fuller (ADF) test for trend stationarity
+  adf_test <- adf.test(data$amr)
+  adf_test_diff <- adf.test(data_diff$amr)
+  
+  # Storing stationarity results in data frame 
+  stationarity_results <- rbind(stationarity_results, data.frame(
+    AMGroup = am,
+    Original_KPSS_stat = round(kpss_test$statistic,2),
+    Original_KPSS_p_value = round(kpss_test$p.value,2),
+    Original_ADF_stat = round(adf_test$statistic,2),
+    Original_ADF_p_value = round(adf_test$p.value,2),
+    Diff1_KPSS_stat = round(kpss_test_diff$statistic,2),
+    Diff1_KPSS_p_value = round(kpss_test_diff$p.value,2),
+    Diff1_ADF_stat = round(adf_test_diff$statistic,2),
+    Diff1_ADF_p_value = round(adf_test_diff$p.value,2)
+  ))
+}
+
+# Printing results 
+rownames(stationarity_results) <- NULL
+print(stationarity_results)
+```
+
+
+Testing stationarity of differenced lifetime AMU trend time series 
+
+```{r, warning=F, message=F}
+# Defining AM-classes
+am_group_names <- c(
+  "Aminoglycosides",
+  "Amphenicols",
+  "SimPenicillins",
+  "ExtPenicillins",
+  "Lincosamides",
+  "Macrolides",
+  "Pleuromutilins",
+  "Tetracyclines"
+)
+
+# Data frame to store stationarity test results 
+stationarity_results <- data.frame(
+  AMGroup = character(),
+  Original_KPSS_stat = numeric(),
+  Original_KPSS_p_value = numeric(),
+  Original_ADF_stat = numeric(),
+  Original_ADF_p_value = numeric(),
+  Diff1_KPSS_stat = numeric(),
+  Diff1_KPSS_p_value = numeric(),
+  Diff1_ADF_stat = numeric(),
+  Diff1_ADF_p_value = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop to test stationarity individually for each AM-class for the lifetime AMU time series trend before and after differencing 
+for (am in am_group_names) {
+
+  # Filtering AM-class of lifetime AMU trend time series 
+  data <- lifetime_AMU_trend %>%
+    filter(am_group == am) %>%
+    select(-am_group) 
+  
+  # Filtering AM-class of differenced lifetime AMU trend time series 
+  data_diff <- lifetime_AMU_trend_diff %>%
+    filter(am_group == am) %>%
+    select(-am_group) 
+  
+  # Kwiatkowski-Phillips-Schmidt-Shin (KPSS) test for trend stationarity
+  kpss_test <- kpss.test(data$amu)
+  kpss_test_diff <- kpss.test(data_diff$amu)
+  
+  # Augmented-Dickey–Fuller (ADF) test for trend stationarity
+  adf_test <- adf.test(data$amu)
+  adf_test_diff <- adf.test(data_diff$amu)
+  
+  # Storing stationarity results in data frame 
+  stationarity_results <- rbind(stationarity_results, data.frame(
+    AMGroup = am,
+    Original_KPSS_stat = round(kpss_test$statistic,2),
+    Original_KPSS_p_value = round(kpss_test$p.value,2),
+    Original_ADF_stat = round(adf_test$statistic,2),
+    Original_ADF_p_value = round(adf_test$p.value,2),
+    Diff1_KPSS_stat = round(kpss_test_diff$statistic,2),
+    Diff1_KPSS_p_value = round(kpss_test_diff$p.value,2),
+    Diff1_ADF_stat = round(adf_test_diff$statistic,2),
+    Diff1_ADF_p_value = round(adf_test_diff$p.value,2)
+  ))
+}
+
+# Printing results 
+rownames(stationarity_results) <- NULL
+print(stationarity_results)
+```
+
+________________________________________________________________________________
+
+
+ARG abundance summary statistics
+
+```{r}
+# Summarizing ARG abundance across all AMR-classes each month
+ARG_abundance_trend_total <- ARG_abundance_trend %>%
+  group_by(Date) %>%
+  summarise(amr = sum(amr), .groups = "drop")
+
+# Summary statistics for total ARG abundance each month
+summary(ARG_abundance_trend_total)
+```
+
+```{r}
+# Summarizing differenced (change in) ARG abundance across all AMR-classes each month
+ARG_abundance_trend_diff_total <- ARG_abundance_trend_diff %>%
+  group_by(Date) %>%
+  summarise(amr = sum(amr), .groups = "drop")
+
+# Summary statistics for differenced (change in) total ARG abundance each month
+summary(ARG_abundance_trend_diff_total)
+```
+
+
+Lifetime AMU summary statistics
+
+```{r}
+# Summarizing lifetime AMU across all AM-classes each month
+lifetime_AMU_trend_total <- lifetime_AMU_trend %>%
+  group_by(Date) %>% 
+  summarise(amu = sum(amu), .groups = "drop")
+
+# Summary statistics for total lifetime AMU each month
+summary(lifetime_AMU_trend_total)
+```
+
+```{r}
+# Summarizing differenced (change in) lifetime AMU across all AM-classes each month
+lifetime_AMU_trend_diff_total <- lifetime_AMU_trend_diff %>%
+  group_by(Date) %>%
+  summarise(amu = sum(amu), .groups = "drop")
+
+# Summary statistics for differenced (change in) total lifetime AMU each month
+summary(lifetime_AMU_trend_diff_total)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

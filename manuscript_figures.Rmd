@@ -1,0 +1,767 @@
+
+Title: Manuscript figures
+Author: Josefine Ostenfeld Nielsen
+Date: January 2024
+Description: Figures for the manuscript and supplementary material 
+
+________________________________________________________________________________
+
+
+Installing packages and loading libraries
+
+```{r, message=F, warning=F}
+# Sourcing packages and libraries from the setup.R script 
+source(file.path("setup.R"))
+```
+
+
+Importing ARG abundance time series data
+
+```{r}
+# Reading data
+ARG_abundance <- read.table(file.path("data/ARG_abundance.txt"), header = TRUE, sep = "\t")
+ARG_abundance_interpolated <- read.table(file.path("data/ARG_abundance_int.txt"), header = TRUE, sep = "\t")
+ARG_abundance_adjusted <- read.table(file.path("data/ARG_abundance_adj.txt"), header = TRUE, sep = "\t")
+ARG_abundance_trend <- read.table(file.path("data/ARG_abundance_trend.txt"), header = TRUE, sep = "\t")
+ARG_abundance_trend_diff <- read.table(file.path("data/ARG_abundance_trend_diff.txt"), header = TRUE, sep = "\t")
+
+lifetime_AMU <- read.table(file.path("data/lifetime_AMU.txt"), header = TRUE, sep = "\t")
+lifetime_AMU_trend <- read.table(file.path("data/lifetime_AMU_trend.txt"), header = TRUE, sep = "\t")
+lifetime_AMU_trend_diff <- read.table(file.path("data/lifetime_AMU_trend_diff.txt"), header = TRUE, sep = "\t")
+
+
+# Formatting Date column 
+ARG_abundance$Date <- as.Date(ARG_abundance$Date)
+ARG_abundance_adjusted$Date <- as.Date(ARG_abundance_adjusted$Date)
+ARG_abundance_interpolated$Date <- as.Date(ARG_abundance_interpolated$Date)
+ARG_abundance_trend$Date <- as.Date(ARG_abundance_trend$Date)
+ARG_abundance_trend_diff$Date <- as.Date(ARG_abundance_trend_diff$Date)
+
+lifetime_AMU$Date <- as.Date(lifetime_AMU$Date)
+lifetime_AMU_trend$Date <- as.Date(lifetime_AMU_trend$Date)
+lifetime_AMU_trend_diff$Date <- as.Date(lifetime_AMU_trend_diff$Date)
+```
+
+________________________________________________________________________________
+
+
+ARG abundance time series data (after interpolation, before adjustment of systematic error and decomposition)
+
+```{r, warning=F, fig.height=9, fig.width=8}
+# Plotting ARG abundance time series
+ggplot() +
+  geom_line(data = ARG_abundance_interpolated, aes(y = amr, x = Date), color = "#1A237E", size = 1) +
+  facet_grid(rows = vars(amr_class), scales = "free") +
+  coord_cartesian(xlim = as.Date(c("2015-01-01", "2023-01-01"))) +
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y", expand = c(0, 0)) +
+  labs(title = "", x = "", y = "ARG abundance [FPKM]", color = "Source") +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 8),
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    panel.spacing = unit(0.75, "lines")
+  ) +
+  geom_hline(yintercept = c(0, NA), color = "lightgray") +
+  geom_vline(xintercept = as.Date(seq(from = as.Date("2015-01-01"), to = as.Date("2023-01-01"), by = "years")), color = "lightgray")
+```
+
+
+Unadjusted and adjusted ARG abundance time series trends
+
+```{r, message=FALSE,warning = FALSE, fig.width=8, fig.height=4}
+# Defining AMR-classes
+amr_class_names <- c(
+  "Aminoglycoside",
+  "Amphenicol",
+  "Beta.lactam",
+  "Lincosamide",
+  "Macrolide",
+  "Pleuromutilin",
+  "Tetracycline"
+)
+
+# Function for z-score standardization
+standardize_columns <- function(data) {
+  numeric_columns <- sapply(data, is.numeric)
+  data[, numeric_columns] <- lapply(data[, numeric_columns, drop = FALSE], function(x) {
+    as.numeric(scale(x))
+  })
+  return(data)
+}
+
+# Data frame to store z-score normalized ARG abundance time series 
+ARG_abundance_interpolated_z <- data.frame(
+  Date = as.Date(character()),
+  amr_class = character(),
+  amr = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop to isolate trend component and z-score normalize ARG abundance for each AMR-class
+for (class in amr_class_names) {
+  
+  # Filtering AMR-class
+  amr <- ARG_abundance_interpolated %>%
+    filter(amr_class == class) %>%
+    select(-amr_class)
+  
+  # Converting to tsibble object (time series Date format)
+  amr_ts <- amr %>%
+    mutate(Date = yearmonth(Date)) %>%
+    as_tsibble(index = Date)
+  
+  # Decomposing and isolating trend component
+  amr_decomposed <- stl(amr_ts, s.window = "periodic", t.window = 7)
+  amr_decomposed <- data.frame(amr_decomposed$time.series)
+  amr_trend <- bind_cols(Date = amr$Date, amr = amr_decomposed$trend)
+  
+  # Removing first and last two values where smoothing was incomplete, and z-score standardizing 
+  amr_trend <- amr_trend %>%
+    standardize_columns() %>%
+    mutate(
+      amr_class = class
+    ) %>%
+    slice(3:(n()-2))
+  
+  # Saving z-score standardized ARG abundance trends 
+  ARG_abundance_interpolated_z <- rbind(ARG_abundance_interpolated_z, amr_trend)
+}  
+  
+# Data frame to store z-score normalized adjusted ARG abundance time series   
+ARG_abundance_adjusted_z <- data.frame(
+  Date = as.Date(character()),
+  amr_class = character(),
+  amr = numeric(),
+  stringsAsFactors = FALSE
+)
+  
+# Loop to isolate trend component and z-score normalize adjusted ARG abundance for each AMR-class
+for (class in amr_class_names) {
+  
+  # Filtering AMR-class
+  amr <- ARG_abundance_adjusted %>%
+    filter(amr_class == class) %>%
+    select(-amr_class) 
+  
+  # Converting to tsibble object (time series Date format)
+  amr_ts <- amr %>%
+    mutate(Date = yearmonth(Date)) %>%
+    as_tsibble(index = Date)
+  
+  # Decomposing and isolating trend component
+  amr_decomposed <- stl(amr_ts, s.window = "periodic", t.window = 7)
+  amr_decomposed <- data.frame(amr_decomposed$time.series)
+  amr_trend <- bind_cols(Date = amr$Date, amr = amr_decomposed$trend)
+  
+  # Removing first and last two values where smoothing was incomplete, and z-score standardizing 
+  amr_trend <- amr_trend %>%
+    standardize_columns() %>%
+    mutate(
+      amr_class = class
+    ) %>%
+    slice(3:(n()-2))
+  
+  # Saving z-score standardized adjusted ARG abundance trends 
+  ARG_abundance_adjusted_z <- rbind(ARG_abundance_adjusted_z, amr_trend)
+}  
+  
+# Defining AMR-class names for plot legend
+custom_labels <- c("Aminoglycoside" = "Aminoglycoside", 
+                   "Amphenicol" = "Amphenicol", 
+                   "Beta.lactam" = "Beta lactam", 
+                   "Lincosamide" = "Lincosamide",
+                   "Macrolide" = "Macrolide", 
+                   "Pleuromutilin" = "Pleuromutilin", 
+                   "Tetracycline" = "Tetracycline")
+
+# Plot of z-score normalized ARG abundance trends (before adjustment)
+ggplot() +
+    geom_line(data = ARG_abundance_interpolated_z, aes(x = Date, y = amr, color = amr_class), size = 1) +
+    coord_cartesian(xlim = as.Date(c("2015-01-01", "2023-01-01")), ylim = c(-3,3)) +
+    scale_y_continuous(name = "Z-score", expand = c(0, 0)) +
+    scale_x_date(date_breaks = "1 year", date_labels = "%Y", expand = c(0, 0)) +
+    labs(title = "ARG abundance trends (unadjusted)", x = "") +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+      axis.text.y = element_text(size = 10),
+      panel.spacing = unit(0.75, "lines"),
+      panel.border = element_rect(color = "lightgray", fill = NA, size = 1),
+      panel.grid.minor = element_blank(),
+      title = element_text(size=12),
+      legend.position = "bottom",
+      legend.text = element_text(size = 12)
+    ) +
+  scale_color_discrete(name = "AMR class", labels = custom_labels)
+
+# Plot of z-score normalized ARG abundance trends (after adjustment)
+ggplot() +
+    geom_line(data = ARG_abundance_adjusted_z, aes(x = Date, y = amr, color = amr_class), size = 1) +
+    coord_cartesian(xlim = as.Date(c("2015-01-01", "2023-01-01")), ylim = c(-3,3)) +
+    scale_y_continuous(name = "Z-score", expand = c(0, 0)) +
+    scale_x_date(date_breaks = "1 year", date_labels = "%Y", expand = c(0, 0)) +
+    labs(title = "ARG abundance trends (adjusted)", x = "") +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+      axis.text.y = element_text(size = 10),
+      panel.spacing = unit(0.75, "lines"),
+      panel.border = element_rect(color = "lightgray", fill = NA, size = 1),
+      panel.grid.minor = element_blank(),
+      title = element_text(size=12),
+      legend.position = "bottom",
+      legend.text = element_text(size = 12)
+    ) +
+  scale_color_discrete(name = "AMR class", labels = custom_labels)
+```
+
+
+Correlation matrix plot of the correlation between the ARG abundances between each AMR-class
+
+```{r, fig.width=10, fig.height=10, warning=FALSE}
+# Preparing ARG abundance data frame
+corr_data <- ARG_abundance_adjusted %>%
+  pivot_wider(names_from = amr_class, values_from = amr) %>%
+  select(-Date)
+
+# Custom panel function for correlation coefficients
+panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor = 1.25, col.cor = "#1A237E") {
+  usr <- par("usr"); on.exit(par(usr))
+  par(usr = c(0, 1, 0, 1))
+  r <- cor(x, y, use = "complete.obs")
+  txt <- format(c(r, 0.123456789), digits = digits)[1]
+  txt <- paste0(prefix, txt)
+  text(0.5, 0.5, txt, cex = cex.cor, col = col.cor)
+}
+
+# Custom panel function for scatter plots
+panel.scatter <- function(x, y, col = "#1A237E") {
+  points(x, y, pch = 19, col = col, cex = 0.8)
+}
+
+# Correlation matrix plot 
+pairs(corr_data, 
+      upper.panel = panel.cor,
+      lower.panel = panel.scatter,
+      cex.labels = 1.25)
+```
+
+
+ARG abundance time series decomposition plots
+
+```{r, warning=FALSE, fig.width=7, fig.height=6}
+# Defining AMR-class names
+am_group_names <- c(
+  "Aminoglycoside",
+  "Amphenicol",
+  "Beta.lactam",
+  "Lincosamide",
+  "Macrolide",
+  "Pleuromutilin",
+  "Tetracycline"
+)
+
+# Loop ti decompose and plot time series decomposition plot of the ARG abundance for each AMR-class 
+for (am in am_group_names) {
+  
+  # Filtering AMR-class and converting into tsibble object (time series Date format)
+  data <- ARG_abundance_adjusted %>%
+    filter(amr_class == am) %>%
+    select(-amr_class) %>%
+    mutate(Date = yearmonth(Date)) %>%
+    as_tsibble(index = Date)
+  
+  # Time series decomposition
+  decomposed <- stl(data, s.window = "periodic", t.window = 7)
+  
+  # Decomposition plot
+  plot(decomposed, main = paste("ARG abundance: Classical additive decomposition of", am))
+}
+```
+
+
+Time series trend plots of corresponding AMU and AMR
+
+```{r, message=FALSE, fig.height=12, fig.width=10, warning = FALSE}
+# Defining AM-class and corresponding AMR-class
+plot_list <- list(
+  list(column_amr = "Aminoglycoside", column_amu = "Aminoglycosides", title = "Aminoglycoside"),
+  list(column_amr = "Amphenicol", column_amu = "Amphenicols", title = "Amphenicol"),
+  list(column_amr = "Beta.lactam", column_amu = "ExtPenicillins", title = "Beta lactam/Extended-spectrum penicillin"),
+  list(column_amr = "Beta.lactam", column_amu = "SimPenicillins", title = "Beta lactam/Narrow-spectrum penicillin"),
+  list(column_amr = "Lincosamide", column_amu = "Lincosamides", title = "Lincosamide"),
+  list(column_amr = "Macrolide", column_amu = "Macrolides", title = "Macrolide"),
+  list(column_amr = "Pleuromutilin", column_amu = "Pleuromutilins", title = "Pleuromutilin"),
+  list(column_amr = "Tetracycline", column_amu = "Tetracyclines", title = "Tetracycline"))
+
+# List to store each plot of the corresponding AMU and AMR
+plot_grid_ts <- list()
+
+# Loop to compute each corresponding AMU and AMR time series trend plot and store in list 
+for (n in plot_list) {
+  
+  # Initiating list and storing as the next object in list in each loop
+  plot_grid_ts[[length(plot_grid_ts) + 1]] <- local({
+  
+    # Filtering AM-class
+    amu <- lifetime_AMU_trend %>%
+      filter(am_group == n$column_amu) %>%
+      select(-am_group)
+    
+    # Filtering AMR-class
+    amr <- ARG_abundance_trend %>%
+      filter(amr_class == n$column_amr) %>%
+      select(-amr_class) 
+    
+    # Re-scale factor to rescale ARG abundance values for secondary y-axis
+    rescale_factor <- mean(amr$amr)/mean(amu$amu)
+    
+    # Re-scaling ARG abundance values for secondary y-axis
+    amr$amr_scaled <- amr$amr/rescale_factor
+
+    # Defining primary y-axis limits
+    max_val <- max(max(amu$amu, na.rm = TRUE), max(amr$amr_scaled, na.rm = TRUE))
+    min_val <- min(min(amu$amu, na.rm = TRUE), min(amr$amr_scaled, na.rm = TRUE))
+    
+    # Defining legend text
+    color1 <- "Lifetime AMU"
+    color2 <- "ARG abundance"
+    
+    # Plotting time series trends
+    p_ts <- ggplot() +
+      geom_line(data = amu, aes(x = Date, y = amu, color = color1), size = 0.75, alpha = 0.75) +
+      geom_line(data = amr, aes(x = Date, y = amr_scaled, color = color2), size = 0.75) +
+      scale_color_manual(values = c("blue", "red"), breaks = c(color1, color2)) +
+      coord_cartesian(xlim = as.Date(c("2013-01-01", "2023-01-01"))) +
+      scale_y_continuous(
+        name = "Lifetime AMU [#ADDkg/pig]",
+        sec.axis = sec_axis(trans = ~ . , labels = scales::number_format(scale = rescale_factor),name = "ARG abundance [FPKM]")
+      ) +
+      scale_x_date(
+        name = "",
+        date_breaks = "1 year", 
+        minor_breaks = "1 year",
+        date_labels = "%Y", 
+        expand = c(0, 0),
+      ) +
+      labs(title = n$title, color = "") +
+      theme_minimal() +
+      theme(
+        axis.text.x.bottom = element_text(angle = 90, hjust = 1, vjust = 0.2, size = 12),
+        axis.text.y.left = element_text(size = 12),
+        axis.text.y.right = element_text(size = 12),
+        axis.title.x.bottom = element_text(size = 12),
+        axis.title.x.top = element_text(size = 12),
+        panel.spacing = unit(0.75, "lines"),
+        panel.border = element_rect(color = "lightgray", fill = NA, size = 1),
+        title = element_text(size=12),
+        plot.title = element_text(size=12),
+        legend.text = element_text(size = 12),
+        legend.position = "top")
+    
+    # Storing plot in list
+    return(p_ts)
+  })
+}
+
+# Extracting the legend from the first plot 
+legend <- get_legend(plot_grid_ts[[1]])
+
+# Removing axis titles and legend from all plots stored in list 
+plots <- lapply(plot_grid_ts, function(p) {
+  p + theme(
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    legend.position = "none")})
+
+# Making combined plot with each corresponding class time series trends plots, adding common axis titles and legend
+plots_axis <- grid.arrange(
+  grobs = plots,
+  ncol = 2,
+  nrow = 4,
+  widths = c(1, 1),
+  bottom = legend,
+  left = textGrob("Lifetime AMU [#ADDkg/pigs]", rot = 90, gp = gpar(fontsize = 12)),
+  right = textGrob("ARG abundance [FPKM]", rot = -90, gp = gpar(fontsize = 12))
+)
+```
+
+
+Differenced time series trend plots of corresponding AMU and AMR
+
+```{r, message=FALSE, fig.height=11, fig.width=10, warning = FALSE}
+# Defining AM-class and corresponding AMR-class
+plot_list <- list(
+  list(column_amr = "Aminoglycoside", column_amu = "Aminoglycosides", title = "Aminoglycoside"),
+  list(column_amr = "Amphenicol", column_amu = "Amphenicols", title = "Amphenicol"),
+  list(column_amr = "Beta.lactam", column_amu = "ExtPenicillins", title = "Beta lactam/Extended-spectrum penicillin"),
+  list(column_amr = "Beta.lactam", column_amu = "SimPenicillins", title = "Beta lactam/Narrow-spectrum penicillin"),
+  list(column_amr = "Lincosamide", column_amu = "Lincosamides", title = "Lincosamide"),
+  list(column_amr = "Macrolide", column_amu = "Macrolides", title = "Macrolide"),
+  list(column_amr = "Pleuromutilin", column_amu = "Pleuromutilins", title = "Pleuromutilin"),
+  list(column_amr = "Tetracycline", column_amu = "Tetracyclines", title = "Tetracycline"))
+
+# Function for z-score standardization
+standardize_columns <- function(data) {
+  numeric_columns <- sapply(data, is.numeric)
+  data[, numeric_columns] <- lapply(data[, numeric_columns, drop = FALSE], function(x) {
+    as.numeric(scale(x))
+  })
+  return(data)
+}
+
+# List to store each plot of the corresponding AMU and AMR
+plot_grid_ts <- list()
+
+# Loop to compute each corresponding AMU and AMR differenced time series trend plot and store in list 
+for (n in plot_list) {
+  
+  # Initiating list and storing as the next object in list in each loop
+  plot_grid_ts[[length(plot_grid_ts) + 1]] <- local({
+  
+    # Filtering AM-class and z-score standardizing the differenced lifetime AMU
+    amu <- lifetime_AMU_trend_diff %>%
+      filter(am_group == n$column_amu) %>%
+      select(-am_group) %>%
+      standardize_columns()
+    
+    # Filtering AMR-class and z-score standardizing the differenced ARG abundance
+    amr <- ARG_abundance_trend_diff %>%
+      filter(amr_class == n$column_amr) %>%
+      select(-amr_class) %>%
+      standardize_columns()
+    
+    # Defining legend text
+    color1 <- "Lifetime AMU´"
+    color2 <- "ARG abundance´"
+    
+    # Plotting time series trends
+    p_ts <- ggplot() +
+      geom_line(data = amu, aes(x = Date, y = amu, color = color1), size = 0.75, alpha = 0.75) +
+      geom_line(data = amr, aes(x = Date, y = amr, color = color2), size = 0.75) +
+      scale_color_manual(values = c("blue", "red"), breaks = c(color1, color2)) +
+      coord_cartesian(xlim = as.Date(c("2013-01-01", "2023-01-01"))) +
+      scale_y_continuous(name = "Z-score", limits = c(-5,5), expand = c(0,0)) +
+      scale_x_date(name = "", date_breaks = "1 year", minor_breaks = "1 year", date_labels = "%Y", expand = c(0, 0)) +
+      labs(title = n$title, color = "") +
+      theme_minimal() +
+      theme(
+        axis.text.x.bottom = element_text(angle = 90, hjust = 1, vjust = 0.2, size = 12),
+        axis.text.y.left = element_text(size = 12),
+        axis.text.y.right = element_text(size = 12),
+        axis.title.x.bottom = element_text(size = 12),
+        axis.title.x.top = element_text(size = 12),
+        panel.spacing = unit(0.75, "lines"),
+        panel.border = element_rect(color = "lightgray", fill = NA, size = 1),
+        title = element_text(size=12),
+        plot.title = element_text(size=12),
+        legend.text = element_text(size = 12),
+        legend.position = "top")
+    
+    # Storing plot in list
+    return(p_ts)
+  })
+}
+
+# Extracting the legend from the first plot 
+legend <- get_legend(plot_grid_ts[[1]])
+
+# Removing axis titles and legend from all plots stored in list 
+plots <- lapply(plot_grid_ts, function(p) {
+  p + theme(
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    legend.position = "none")})
+
+# Making combined plot with each corresponding class time series trends plots, adding common axis titles and legend
+plots_axis <- grid.arrange(
+  grobs = plots,
+  ncol = 2,
+  nrow = 4,
+  bottom = legend,
+  left = textGrob("Z-score", rot = 90, gp = gpar(fontsize = 12))
+)
+```
+
+
+Pearson's correlation coefficient (r) heatmap for each corresponding AMR and AMU at lag 0 - 18 months
+
+```{r, message=FALSE,warning = FALSE, fig.height=4, fig.width=9}
+# Defining max time lag of lifetime AMU
+lag_max <- 18
+
+# Defining AM-class and corresponding AMR-class
+plot_list <- list(
+  list(column_amr = "Aminoglycoside", column_amu = "Aminoglycosides", title = "Aminoglycoside"),
+  list(column_amr = "Amphenicol", column_amu = "Amphenicols", title = "Amphenicol"),
+  list(column_amr = "Beta.lactam", column_amu = "ExtPenicillins", title = "B.lac/E.Pen."),
+  list(column_amr = "Beta.lactam", column_amu = "SimPenicillins", title = "B.lac/N.Pen."),
+  list(column_amr = "Lincosamide", column_amu = "Lincosamides", title = "Lincosamide"),
+  list(column_amr = "Macrolide", column_amu = "Macrolides", title = "Macrolide"),
+  list(column_amr = "Pleuromutilin", column_amu = "Pleuromutilins", title = "Pleuromutilin"),
+  list(column_amr = "Tetracycline", column_amu = "Tetracyclines", title = "Tetracycline"))
+
+# Function to assign sign. code
+assign_sig_code <- function(p_value) {
+  if (p_value < 0.001) {
+    return("***")
+  } else if (p_value < 0.01) {
+    return("**")
+  } else if (p_value < 0.05) {
+    return("*")
+  } else if (p_value < 0.1) {
+    return("˙")
+  } else {
+    return("")
+  }
+}
+
+# Data frame to store results from correlation test
+ccf_df <- data.frame(
+  amr_class = character(),
+  lag = numeric(),
+  corr = numeric(),
+  p_val = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Initialize an empty data frame for combined results for all classes for the heatmap
+hm_df <- data.frame()
+
+# Loop to estimate Pearson's correlation coefficient for each corresponding AMR and AMU at each lag
+for (n in plot_list) {
+  
+  # Filtering AM-class
+  amu <- lifetime_AMU_trend_diff %>%
+    filter(am_group == n$column_amu) %>%
+    select(-am_group)
+  
+  # Filtering AMR-class
+  amr <- ARG_abundance_trend_diff %>%
+    filter(amr_class == n$column_amr) %>%
+    select(-amr_class) 
+  
+  # Number of lags to be investigated
+  lags <- seq(0, lag_max)
+  
+  # Nested loop to make cor.test for each lag individually 
+  for (n_lag in lags) {
+    
+    # Aligning AMR and time-lagged AMU time series for training data set (2015-2021)
+    aligned_data <- amu %>%
+      left_join(amr, by = "Date") %>%
+      mutate(amu = lag(amu, n = n_lag, default = NA)) %>%
+      filter(!is.na(amr)) %>%
+      filter(year(Date) < 2022) 
+    
+    # Estimating correlation coefficient
+    ccf_results <- cor.test(aligned_data$amu, aligned_data$amr, alternative = "greater", method = "pearson")
+  
+    # Storing results 
+    ccf_df <- rbind(ccf_df, data.frame(
+      amr_class = n$title,
+      lag = n_lag,
+      corr = ccf_results$estimate[["cor"]],
+      p_val = ccf_results$p.value
+    ))
+  }
+  
+  # Assigning significance code to p-value
+  ccf_df$sign_code <- sapply(ccf_df$p_val, assign_sig_code)
+  
+  # Storing results in compbined results data frame for the heatmap
+  if(nrow(hm_df) == 0){
+    hm_df <- ccf_df
+  } else {
+    hm_df <- rbind(hm_df, ccf_df)
+  }
+  
+  # Resetting data frame for storing correlation results in each loop
+  ccf_df <- NULL
+}
+
+# Alphabetically sorting results for each class for visualization purposes in the heatmap
+hm_df$amr_class <- factor(hm_df$amr_class, levels = rev(sort(unique(hm_df$amr_class))))
+
+# Computing heatmap of correlation coefficients
+ggplot(hm_df, aes(x = lag, y = amr_class, fill = corr)) +
+  geom_tile(color = "white") +  
+  geom_text(aes(label = sign_code), color = "black", angle = 0, vjust = 0.75) +  
+  scale_fill_gradient2(low = "blue", high = "red", mid = "#eeeeee", midpoint = 0, limit = c(-0.5, 0.5), space = "Lab") +  
+  scale_x_continuous(limits = c(-0.5,lag_max+0.5), breaks = seq(0, lag_max, by = 1), expand = c(0,0)) +
+  theme_minimal() +  
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 1),  
+    plot.title = element_text(hjust = -0.25, size = 10)
+  ) +
+  labs(title = "", x = "Lag [months]", y = "", fill = "r") 
+
+
+```
+
+
+ARG abundance 2022 forecast plot
+
+```{r, message=FALSE, fig.height=12, fig.width=10, warning = FALSE}
+# Defining AMU/AMR combinations and titles
+plot_list <- list(
+  list(column_amr = "Aminoglycoside", column_amu = "Aminoglycosides", title = "Aminoglycoside (lag: 8 months)", p = 0, q = 2, Q = 1, lag = 8),
+  list(column_amr = "Amphenicol", column_amu = "Amphenicols", title = "Amphenicol (lag: 8 months)", p = 0, q = 1, Q = 0, lag = 8),
+  list(column_amr = "Beta.lactam", column_amu = "ExtPenicillins", title = "Beta lactam/Extended-spectrum penicillins (lag: 7 months)", p = 2, q = 1, Q = 1, lag = 7),
+  list(column_amr = "Beta.lactam", column_amu = "SimPenicillins", title = "Beta lactam/Narrow-spectrum penicillins (lag: 7 months)", p = 2, q = 3, Q = 0, lag = 7),
+  list(column_amr = "Lincosamide", column_amu = "Lincosamides", title = "Lincosamide (lag: 5 months)", p = 2, q = 0, Q = 0, lag = 5),
+  list(column_amr = "Macrolide", column_amu = "Macrolides", title = "Macrolide (no lag)", p = 0, q = 1, Q = 0, lag = 0),
+  list(column_amr = "Pleuromutilin", column_amu = "Pleuromutilins", title = "Pleuromutilin (lag: 7 months)", p = 3, q = 0, Q = 1, lag = 7),
+  list(column_amr = "Tetracycline", column_amu = "Tetracyclines", title = "Tetracycline (lag: 9 months)", p = 0, q = 3, Q = 1, lag = 9))
+
+# List to store plots
+plot_grid_ts <- list()
+
+# 
+for (n in plot_list) {
+  
+  # Initiating list and storing as the next object in list in each loop
+  plot_grid_ts[[length(plot_grid_ts) + 1]] <- local({
+    
+      # Filtering AM-class
+      amu <- lifetime_AMU_trend_diff %>%
+        filter(am_group == n$column_amu) %>%
+        select(-am_group)
+      
+      # Filtering AMR-class
+      amr <- ARG_abundance_trend_diff %>%
+        filter(amr_class == n$column_amr) %>%
+        select(-amr_class) 
+      
+      # Converting into tsibble object (time series Date format)
+      amu_trend <- lifetime_AMU_trend %>%
+        filter(am_group == n$column_amu) %>%
+        select(-am_group)
+      
+      # Converting into tsibble object (time series Date format)
+      amr_trend <- ARG_abundance_trend %>%
+        filter(amr_class == n$column_amr) %>%
+        select(-amr_class) 
+    
+      # Aligning AMR and time-lagged AMU time series for training data set (2015-2021)
+      aligned_data <- amu %>%
+        left_join(amr, by = "Date") %>%
+        mutate(amu = lag(amu, n = n$lag, default = NA)) %>%
+        filter(!is.na(amr)) %>%
+        filter(year(Date) < 2022) %>%
+        mutate(Date = yearmonth(Date)) %>%
+        as_tsibble(index = Date)
+      
+      # Computing identified significant DR model
+      model <- aligned_data %>%
+        model(ARIMA(amr ~ 0 + amu + pdq(n$p,0,n$q) + PDQ(0,0,n$Q)))
+      
+      # Defining the subset of the lifetime AMU time series identified as the significant predictor of the ARG abundance from January 2022 to October 2022
+      data_forecast <- amu %>%
+        slice((n()-(11+n$lag)):(n()-(2+n$lag))) %>%
+        mutate(Date = Date + months(n$lag)) %>%
+        mutate(Date = yearmonth(Date)) %>%
+        as_tsibble(index = Date)
+      
+      # Forecasting ARG abundance 2022 trend
+      fcast <- forecast(model, new_data = data_forecast)
+      
+      # Storing forecast (chance in ARG abundance from the month prior) with respective months in 2022
+      fcast_result <- bind_cols(Date = amu[(nrow(amu)-11):(nrow(amu)-2), 1], amr_diff_forecast = fcast$.mean)
+      
+      # Initiating vector to store absolute ARG abundance forecast values for the 10 months (January 2022 to October 2022) 
+      fcast_result$amr_forecast <- numeric(10)
+      
+      # Estimating absolute ARG abundance forecasted for January 2022
+      fcast_result$amr_forecast[1] <- amr_trend$amr[80] + fcast_result$amr_diff_forecast[1]
+    
+      # Loop through the remaining rows to calculate absolute ARG abundance forecast values for each month
+      for(i in 2:nrow(fcast_result)) {
+        fcast_result$amr_forecast[i] <- fcast_result$amr_forecast[i-1] + fcast_result$amr_diff_forecast[i]
+      }
+      
+      # Defining ARG abundance training dataset
+      training_data <- amr_trend %>% filter(year(Date) < 2022) 
+      
+      # Defining ARG abundance test dataset 
+      test_data <- amr_trend %>% filter(year(Date) > 2019)
+      
+      # Re-scale factor to rescale ARG abundance values for secondary y-axis
+      amr <- amr_trend %>% filter(year(Date) > 2019)
+      amu <- amu_trend %>% filter(year(Date) > 2019)
+      rescale_factor <- mean(amr$amr)/mean(amu$amu)
+      
+      # Re-scaling ARG abundance values for secondary y-axis
+      amr$amr_scaled <- amr$amr/rescale_factor
+      fcast_result$amr_forecast_scaled <- fcast_result$amr_forecast/rescale_factor
+      
+      # Defining primary y-axis limits
+      max_val <- max(max(amu$amu, na.rm = TRUE), max(amr$amr_scaled, na.rm = TRUE), max(fcast_result$amr_forecast_scaled, na.rm = TRUE))
+      min_val <- min(min(amu$amu, na.rm = TRUE), min(amr$amr_scaled, na.rm = TRUE), min(fcast_result$amr_forecast_scaled, na.rm = TRUE))
+      
+      # Defining legend text
+      color1 <- "Lifetime AMU"
+      color2a <- "ARG abundance (training data)"
+      color2b <- "ARG abundance (test data)"
+      color3 <- "ARG abundance (forecast)"
+      
+            # Computing forecast plot
+      p_ts <- ggplot() +
+        geom_line(data = amu_trend, aes(x = Date, y = amu, color = color1), size = 1, alpha = 0.5) +
+        geom_line(data = test_data, aes(x = Date, y = amr/rescale_factor, color = color2b), linetype = "twodash", size = 1) +
+        geom_line(data = training_data, aes(x = Date, y = amr/rescale_factor, color = color2a), size = 1) +
+        geom_line(data = fcast_result, aes(x = Date, y = amr_forecast/rescale_factor, color = color3), linetype = "twodash", size = 1) +
+        scale_color_manual(values = c("blue", "red", "red", "black"), breaks = c(color1, color2a, color2b, color3)) +
+        guides(color = guide_legend(override.aes = list(linetype = c("solid", "solid", "twodash", "twodash"))), linetype = FALSE) +
+        labs(title = n$title, x = "", y = "", color = "") +
+        scale_y_continuous(
+          name = "Lifetime AMU [#ADDkg/pig]", limits = c(min_val, max_val),
+          sec.axis = sec_axis(trans = ~ . , labels = scales::number_format(scale = rescale_factor), name = "ARG abundnce [FPKM]"),
+        ) +
+        scale_x_date(date_breaks = "1 year", date_labels = "%Y", expand = c(0, 0)) +
+        coord_cartesian(xlim = as.Date(c("2020-01-01", "2023-01-01"))) +
+        theme_minimal() +
+        theme(
+          axis.text.x.bottom = element_text(angle = 90, hjust = 1, vjust = 0.2, size = 12),
+          axis.text.y.left = element_text(size = 12),
+          axis.text.y.right = element_text(size = 12),
+          axis.title.x.bottom = element_text(size = 12),
+          axis.title.x.top = element_text(size = 12),
+          panel.spacing = unit(0.75, "lines"),
+          panel.border = element_rect(color = "lightgray", fill = NA, size = 1),
+          title = element_text(size=12),
+          plot.title = element_text(size=12),
+          legend.text = element_text(size = 12),
+          legend.position = "top")
+      
+      # Storing plot in list  
+      return(p_ts)
+    })
+}
+
+# Extracting the legend from the first plot 
+legend <- get_legend(plot_grid_ts[[1]])
+
+# Removing axis titles and legend from all plots stored in list 
+plots <- lapply(plot_grid_ts, function(p) {
+  p + theme(
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    legend.position = "none")})
+
+# Making combined plot with each corresponding class time series trends plots, adding common axis titles and legend
+plots_axis <- grid.arrange(
+  grobs = plots,
+  ncol = 2,
+  nrow = 4,
+  bottom = legend,
+  left = textGrob("Lifetime AMU [#ADDkg/pigs]", rot = 90, gp = gpar(fontsize = 12)),
+  right = textGrob("ARG abundance [FPKM]", rot = -90, gp = gpar(fontsize = 12))
+)
+```
+
+
+
+
+
