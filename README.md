@@ -72,11 +72,9 @@ Each file's data are essential to the subsequent analysis steps outlined in the 
 
 ## Usage and Attribution
 
-The data and code provided in this project are for academic and non-commercial use only. Any results, findings, or outputs generated using the data, code, or methodologies contained within this project should be properly attributed and, if used in academic contexts, cited in accordance with academic standards.
+The data and code provided in this project are for academic and non-commercial use only. Please note that while the code and data are provided here for reproducibility and academic purposes, the intellectual property rights of the results and findings they produce belong to the authors of the ***Forecasting Antimicrobial Resistance Gene Abundance in the Danish Pig Production through Time Series Analysis of Antimicrobial Usage and Resistance Data*** unless otherwise specified.
 
-Please note that while the code and data are provided here for reproducibility and academic purposes, the intellectual property rights of the results and findings they produce belong to the authors of the ***Forecasting Antimicrobial Resistance Gene Abundance in the Danish Pig Production through Time Series Analysis of Antimicrobial Usage and Resistance Data*** unless otherwise specified.
-
-If you wish to use any of the project's contents for purposes beyond those outlined above, including commercial use or in a manner associated with the publication of your own findings or results, please contact the authors for permission.
+If you wish to use any of the project's contents for purposes beyond those outlined above, please contact the authors for permission.
 
 ## Corresponding Author 
 
