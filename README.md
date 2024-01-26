@@ -2,11 +2,9 @@
 
 Welcome to the repository for the time series analysis used in the manuscript ***Forecasting Antimicrobial Resistance Gene Abundance in the Danish Pig Production through Time Series Analysis of Antimicrobial Usage and Resistance Data***. This project contains the R code and data required to replicate the analysis presented in the manuscript.
 
-Antimicrobial resistance (AMR) poses a significant challenge to public health. In an effort to understand and predict the dynamics of antimicrobial resistance gene (ARG) abundance in the Danish pig production, this project applies rigorous time series analysis methods to antimicrobial usage and resistance data. The objective is to forecast ARG abundance and provide insights that could inform policy and practice in antimicrobial stewardship.
+Antimicrobial resistance (AMR) poses a significant challenge to public health. In an effort to understand and predict the dynamics of antimicrobial resistance gene (ARG) abundance in the Danish pig production, this project applies time series analysis methods to antimicrobial usage and resistance data. The objective is to forecast ARG abundance and provide insights that could inform policy and practice in antimicrobial stewardship.
 
-The codes within this repository are structured to correspond with the various stages of the analysis as detailed in the manuscript. From pre-processing of the raw data to the application of sophisticated forecasting models, each step are found within the R Markdown scripts to facilitate transparency and reproducibility.
-
-We invite researchers, data scientists, and epidemiologists to explore these scripts, replicate the analysis, and contribute to the research in antimicrobial resistance in food-producing animals.
+The codes within this repository are structured to correspond with the various stages of the analysis as detailed in the manuscript. From pre-processing of the raw data to the application of time series forecasting, each step are found within the R Markdown scripts to facilitate transparency and reproducibility.
 
 Please refer to the sections below for detailed instructions on setting up the environment, executing the scripts, and understanding the structure of the data and code.
 
