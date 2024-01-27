@@ -68,12 +68,8 @@ The data required for the analysis is located within the `data/` directory of th
 
 Each file's data are essential to the subsequent analysis steps outlined in the R Markdown scripts. The scripts reference these files directly, ensuring a seamless flow from raw data to processed outputs.
 
-## Usage and Attribution
-
-The data and code provided in this project are for academic and non-commercial use only. Please note that while the code and data are provided here for reproducibility and academic purposes, the intellectual property rights of the results and findings they produce belong to the authors of the ***Forecasting Antimicrobial Resistance Gene Abundance in the Danish Pig Production through Time Series Analysis of Antimicrobial Usage and Resistance Data*** unless otherwise specified.
-
-If you wish to use any of the project's contents for purposes beyond those outlined above, please contact the authors for permission.
-
 ## Corresponding Author 
 
 Josefine Ostenfeld Nielsen, Research Group for Genomic Epidemiology, Technical University of Denmark, Søltoft Plads, DK-2800 Kgs. Lyngby, Denmark. E-mail: josefineon@gmail.com
+
+The data and code provided in this project are for academic and non-commercial use only. Please note that while the code and data are provided here for reproducibility and academic purposes, the intellectual property rights of the results and findings they produce belong to the authors of the ***Forecasting Antimicrobial Resistance Gene Abundance in the Danish Pig Production through Time Series Analysis of Antimicrobial Usage and Resistance Data*** unless otherwise specified.
